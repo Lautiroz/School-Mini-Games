@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎮 MiniJuegos</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+  <!-- Botón de Música -->
+  <button id="btn-music" class="music-btn" onclick="toggleMusic()" title="Música">🔇</button>
+
+  <!-- LOGIN -->
+  <section id="screen-login" class="screen active">
+    <div class="card">
+      <h1>🎮 MiniJuegos</h1>
+      <p class="subtitle">Ingresá tu nombre para empezar</p>
+      <input id="nickname-input" class="input-large" maxlength="15" placeholder="Tu NickName" autocomplete="off">
+      <button class="btn-primary" onclick="entrarLobby()">Continuar →</button>
+      <p id="login-error" class="error"></p>
+    </div>
+  </section>
+
+  <!-- LOBBY -->
+  <section id="screen-lobby" class="screen">
+    <!-- ... (el resto del lobby queda igual) ... -->
+    <div class="card">
+      <h1>Hola, <span id="lobby-nickname" class="nickname"></span> 👋</h1>
+      <p class="subtitle">¿Qué querés hacer?</p>
+      <button class="btn-primary" id="btn-crear" onclick="crearSala()">➕ Crear Sala</button>
+      <div class="separator"><span>o unite a una existente</span></div>
+      <div class="input-row">
+        <input id="join-code" class="input-large" maxlength="6" placeholder="Código (ej: ABC123)" autocomplete="off" style="text-transform:uppercase">
+        <button class="btn-secondary" onclick="unirseSala()">Unirse</button>
+      </div>
+      <p id="lobby-error" class="error"></p>
+      <p id="lobby-info" class="info"></p>
+    </div>
+  </section>
+
+  <!-- ROOM -->
+  <section id="screen-room" class="screen">
+    <!-- ... (el resto de la sala queda igual) ... -->
+    <div class="room-top">
+      <div>
+        <span class="label">Sala</span>
+        <span id="room-code" class="code-badge">------</span>
+      </div>
+      <button class="btn-small" onclick="salirSala()">Salir</button>
+    </div>
+
+    <div class="players-box">
+      <h3>Jugadores (<span id="player-count">1</span>)</h3>
+      <div id="players-list" class="players-list"></div>
+    </div>
+
+    <h3 class="games-title">Elegí un juego</h3>
+    <div class="games-grid">
+      <button class="game-card" onclick="abrirJuego('carrera')">
+        <div class="game-icon">🏎️</div>
+        <h4>Carrera</h4>
+        <p>Multijugador</p>
+      </button>
+      <button class="game-card" onclick="abrirJuego('adivina')">
+        <div class="game-icon">🌐</div>
+        <h4>Adivina el Número</h4>
+        <p>Multijugador</p>
+      </button>
+    </div>
+  </section>
+
+  <!-- GAME -->
+  <section id="screen-game" class="screen">
+    <!-- ... (el juego queda igual) ... -->
+    <div class="game-top">
+      <button class="btn-small" onclick="volverSala()">← Volver a la Sala</button>
+      <h2 id="game-title">Juego</h2>
+    </div>
+    <div id="game-content"></div>
+  </section>
+
+  <!-- Agregamos musica.js antes de app.js -->
+  <script src="musica.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

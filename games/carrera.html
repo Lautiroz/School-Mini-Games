@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Carrera</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a1a;
+      color: #f0f0f0;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0.5rem;
+      height: 100vh;
+      overflow: hidden;
+    }
+    h1 { margin-bottom: 0.3rem; font-size: 1.2rem; }
+    #hud {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+      background: #1e1e2f;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: 1px solid #3a3a5a;
+    }
+    #hud span { opacity: 0.6; }
+    #hud b { color: #4cf; font-variant-numeric: tabular-nums; }
+    canvas {
+      border-radius: 12px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      max-width: 100%;
+      max-height: 60vh;
+      height: auto;
+      outline: none;
+    }
+    .instrucciones {
+      margin-top: 0.5rem;
+      opacity: 0.6;
+      font-size: 0.8rem;
+      text-align: center;
+    }
+    #overlay {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(10, 10, 26, 0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      z-index: 10;
+    }
+    #overlay h2 { font-size: 1.8rem; margin-bottom: 1rem; }
+    #overlay button {
+      padding: 0.8rem 1.5rem;
+      font-size: 1.1rem;
+      background: #6c6cff;
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    #overlay button:hover { background: #5a5aff; }
+    .canvas-wrap { position: relative; }
+    #race-results { margin-top: 1rem; width: 100%; max-width: 400px; background: #2e2e4a; padding: 1rem; border-radius: 12px; display: none; }
+    #race-results h3 { text-align: center; margin-bottom: 0.5rem; color: #ffd93d; font-size: 1.1rem; }
+    .result-row { display: flex; justify-content: space-between; padding: 0.3rem; border-bottom: 1px solid #3a3a5a; font-size: 0.9rem;}
+    .result-row:last-child { border: none; }
+  </style>
+</head>
+<body>
+  <h1>🏎️ Carrera (3 Vueltas)</h1>
+  <div id="hud">
+    <div><span>Vuelta:</span> <b id="vuelta">0</b>/3</div>
+    <div><span>Tiempo:</span> <b id="tiempo">0.00</b>s</div>
+    <div><span>Mejor:</span> <b id="mejor">--</b>s</div>
+    <div><span>Vel:</span> <b id="vel">0</b></div>
+  </div>
+  
+  <div class="canvas-wrap">
+    <canvas id="game" width="800" height="500"></canvas>
+    <div id="overlay">
+      <h2 id="overlay-text">Esperando al Host...</h2>
+      <button id="btn-start" style="display:none" onclick="solicitarInicio()">Iniciar Carrera 🏁</button>
+    </div>
+  </div>
+
+  <div id="race-results">
+    <h3>🏆 Resultados</h3>
+    <div id="results-list"></div>
+  </div>
+
+  <p class="instrucciones">← → girar · ↑ acelerar · ↓ frenar</p>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const isHost = urlParams.get('host') === 'true';
+
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width;
+    const H = canvas.height;
+    const CX = W / 2;
+    const CY = H / 2;
+
+    const OUTER_RX = 340;
+    const OUTER_RY = 210;
+    const INNER_RX = 200;
+    const INNER_RY = 110;
+    
+    const START_X = CX;
+    const START_Y = CY - (OUTER_RY + INNER_RY) / 2;
+
+    const TOTAL_LAPS = 3;
+    let car, state, lastTime, lapFlashTime, lastLapTime;
+    let raceStarted = false;
+    let raceFinished = false;
+    
+    // Variables multijugador
+    let myId = "";
+    let myColor = "#e63946";
+    let targetCars = {}; // Posiciones exactas que llegan de la red
+    let remoteCars = {}; // Posiciones suavizadas que se dibujan en pantalla
+    let lastSync = 0;
+
+    function resetGame() {
+      const oldKeys = state ? state.keys : {};
+      car = {
+        x: START_X,
+        y: START_Y,
+        angle: Math.PI,
+        speed: 0,
+        width: 18,
+        height: 32,
+        maxSpeed: 8,
+        accel: 0.15,
+        friction: 0.03,
+        turnSpeed: 0.06,
+      };
+
+      state = {
+        lap: 0,
+        time: 0,
+        best: null,
+        lapStartTime: 0,
+        lastAngle: Math.atan2(car.y - CY, car.x - CX),
+        totalAngle: 0,
+        keys: oldKeys,
+      };
+
+      lapFlashTime = 0;
+      lastLapTime = null;
+      raceFinished = false;
+      document.getElementById("race-results").style.display = "none";
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (!raceStarted) return;
+      state.keys[e.key] = true;
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(e.key)) {
+        e.preventDefault();
+      }
+    });
+
+    document.addEventListener("keyup", (e) => {
+      state.keys[e.key] = false;
+    });
+
+    function isOffTrack(x, y) {
+      const dx = (x - CX) / OUTER_RX;
+      const dy = (y - CY) / OUTER_RY;
+      if (dx * dx + dy * dy > 1) return true;
+      const ix = (x - CX) / INNER_RX;
+      const iy = (y - CY) / INNER_RY;
+      if (ix * ix + iy * iy < 1) return true;
+      return false;
+    }
+
+    function updateCar() {
+      if (!raceStarted) return;
+      const k = state.keys;
+
+      if (k["ArrowUp"]) car.speed += car.accel;
+      else if (k["ArrowDown"]) car.speed -= car.accel * 1.5;
+      else car.speed *= 1 - car.friction;
+
+      car.speed = Math.max(-car.maxSpeed / 2, Math.min(car.maxSpeed, car.speed));
+
+      const turnFactor = Math.abs(car.speed) / car.maxSpeed;
+      if (Math.abs(car.speed) > 0.1) {
+        if (k["ArrowLeft"]) car.angle -= car.turnSpeed * turnFactor * Math.sign(car.speed);
+        if (k["ArrowRight"]) car.angle += car.turnSpeed * turnFactor * Math.sign(car.speed);
+      }
+
+      const nx = car.x + Math.cos(car.angle) * car.speed;
+      const ny = car.y + Math.sin(car.angle) * car.speed;
+
+      let movedX = false, movedY = false;
+      if (!isOffTrack(nx, car.y)) { car.x = nx; movedX = true; }
+      if (!isOffTrack(car.x, ny)) { car.y = ny; movedY = true; }
+
+      if (!movedX && !movedY) car.speed *= 0.1;
+      else if (!movedX || !movedY) car.speed *= 0.7;
+    }
+
+    function updateLaps() {
+      if (!raceStarted || raceFinished) return;
+      
+      const angle = Math.atan2(car.y - CY, car.x - CX);
+      let delta = angle - state.lastAngle;
+      if (delta > Math.PI) delta -= 2 * Math.PI;
+      if (delta < -Math.PI) delta += 2 * Math.PI;
+      state.totalAngle += delta;
+      state.lastAngle = angle;
+
+      if (Math.abs(state.totalAngle) >= 2 * Math.PI) {
+        const lapTime = state.time - state.lapStartTime;
+        lastLapTime = lapTime;
+        state.best = state.best === null ? lapTime : Math.min(state.best, lapTime);
+        state.lap++;
+        state.totalAngle = 0;
+        state.lapStartTime = state.time;
+        lapFlashTime = 1.8;
+
+        if (state.lap >= TOTAL_LAPS) {
+          terminarCarrera();
+        }
+      }
+    }
+
+    function terminarCarrera() {
+      raceStarted = false;
+      raceFinished = true;
+      window.parent.postMessage({ type: 'race-finished', time: state.time }, '*');
+      
+      document.getElementById("overlay-text").textContent = "¡Terminaste! 🏁";
+      document.getElementById("btn-start").style.display = "none";
+      document.getElementById("overlay").style.display = "flex";
+    }
+
+    function solicitarInicio() {
+      window.parent.postMessage({ type: 'host-start-race' }, '*');
+    }
+
+    window.addEventListener("message", (event) => {
+      if (event.data.type === 'start-race') {
+        myId = event.data.myId;
+        myColor = event.data.myColor;
+        
+        resetGame();
+        
+        const offset = event.data.offset || 0;
+        car.x -= offset * 30;
+
+        raceStarted = true;
+        lastTime = performance.now();
+        targetCars = {}; 
+        remoteCars = {};
+        
+        document.getElementById("overlay").style.display = "none";
+        window.focus();
+      } 
+      else if (event.data.type === 'cars-sync') {
+        // Guardamos las posiciones que llegan de la red
+        for (const id in event.data.cars) {
+          if (id === myId) continue;
+          targetCars[id] = event.data.cars[id];
+        }
+      }
+      else if (event.data.type === 'show-results') {
+        mostrarResultados(event.data.results);
+      }
+    });
+
+    function mostrarResultados(results) {
+      const list = document.getElementById("results-list");
+      list.innerHTML = "";
+      results.forEach((r, i) => {
+        const div = document.createElement("div");
+        div.className = "result-row";
+        div.innerHTML = `<span>${i+1}° ${r.name}</span> <b>${r.time.toFixed(2)}s</b>`;
+        list.appendChild(div);
+      });
+      document.getElementById("race-results").style.display = "block";
+    }
+
+    function drawTrack() {
+      ctx.fillStyle = "#0a0a1a";
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#1a3d1a";
+      ctx.beginPath(); ctx.ellipse(CX, CY, OUTER_RX + 30, OUTER_RY + 30, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#3a3a3a";
+      ctx.beginPath(); ctx.ellipse(CX, CY, OUTER_RX, OUTER_RY, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#1a3d1a";
+      ctx.beginPath(); ctx.ellipse(CX, CY, INNER_RX, INNER_RY, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.ellipse(CX, CY, OUTER_RX, OUTER_RY, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(CX, CY, INNER_RX, INNER_RY, 0, 0, Math.PI * 2); ctx.stroke();
+
+      const sx1 = CX - 15, sx2 = CX + 15, sy1 = CY - OUTER_RY, sy2 = CY - INNER_RY, cell = 10;
+      for (let x = sx1; x < sx2; x += cell) {
+        for (let y = sy1; y < sy2; y += cell) {
+          const black = (Math.floor((x - sx1) / cell) + Math.floor((y - sy1) / cell)) % 2 === 0;
+          ctx.fillStyle = black ? "#000" : "#fff";
+          ctx.fillRect(x, y, Math.min(cell, sx2 - x), Math.min(cell, sy2 - y));
+        }
+      }
+    }
+
+    function drawCarAt(x, y, angle, color) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle + Math.PI / 2);
+      
+      ctx.fillStyle = "rgba(0,0,0,0.4)";
+      ctx.beginPath(); ctx.roundRect(-car.width / 2 + 2, -car.height / 2 + 3, car.width, car.height, 4); ctx.fill();
+      ctx.fillStyle = "#111";
+      ctx.fillRect(-car.width / 2 - 2, -car.height / 2 + 4, 3, 8);
+      ctx.fillRect(car.width / 2 - 1, -car.height / 2 + 4, 3, 8);
+      ctx.fillRect(-car.width / 2 - 2, car.height / 2 - 12, 3, 8);
+      ctx.fillRect(car.width / 2 - 1, car.height / 2 - 12, 3, 8);
+      
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.roundRect(-car.width / 2, -car.height / 2, car.width, car.height, 4); ctx.fill();
+      ctx.fillStyle = "#1a1a3a";
+      ctx.beginPath(); ctx.roundRect(-car.width / 2 + 4, -car.height / 2 + 10, car.width - 8, 8, 2); ctx.fill();
+      ctx.fillStyle = "#fff9c4";
+      ctx.fillRect(-car.width / 2 + 3, -car.height / 2 + 1, 4, 3);
+      ctx.fillRect(car.width / 2 - 7, -car.height / 2 + 1, 4, 3);
+      
+      ctx.restore();
+    }
+
+    function drawLapFlash() {
+      if (lapFlashTime <= 0) return;
+      const alpha = Math.min(1, lapFlashTime);
+      ctx.save(); ctx.globalAlpha = alpha; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#ffd93d"; ctx.font = "bold 36px system-ui";
+      ctx.fillText(`¡VUELTA ${state.lap}!`, W / 2, H / 2 - 20);
+      ctx.font = "bold 48px system-ui"; ctx.fillStyle = "#fff";
+      ctx.fillText(lastLapTime.toFixed(2) + "s", W / 2, H / 2 + 30);
+      ctx.restore();
+    }
+
+    function updateHUD() {
+      document.getElementById("vuelta").textContent = Math.min(state.lap, TOTAL_LAPS);
+      document.getElementById("tiempo").textContent = (state.time - state.lapStartTime).toFixed(2);
+      document.getElementById("mejor").textContent = state.best === null ? "--" : state.best.toFixed(2);
+      document.getElementById("vel").textContent = Math.round(Math.abs(car.speed) * 30);
+    }
+
+    function loop(now) {
+      const dt = Math.min((now - lastTime) / 1000, 0.05);
+      lastTime = now;
+      
+      if (raceStarted) {
+        state.time += dt;
+
+        // ✅ Aumentamos a 30 FPS el envío (cada 33ms)
+        if (now - lastSync > 33) {
+          window.parent.postMessage({ 
+            type: 'car-update', 
+            state: { x: car.x, y: car.y, angle: car.angle, color: myColor } 
+          }, '*');
+          lastSync = now;
+        }
+      }
+
+      updateCar();
+      updateLaps();
+      if (lapFlashTime > 0) lapFlashTime -= dt;
+
+      drawTrack();
+      
+      // ✅ Interpolación de los autos remotos
+      // Esto hace que se deslicen suavemente hacia su nueva posición en vez de teleportarse
+      const lerpFactor = 1 - Math.pow(0.001, dt); 
+      for (const id in targetCars) {
+        const target = targetCars[id];
+        
+        if (!remoteCars[id]) {
+          remoteCars[id] = { x: target.x, y: target.y, angle: target.angle, color: target.color };
+        }
+        const curr = remoteCars[id];
+        
+        curr.x += (target.x - curr.x) * lerpFactor;
+        curr.y += (target.y - curr.y) * lerpFactor;
+        
+        let da = target.angle - curr.angle;
+        while (da > Math.PI) da -= Math.PI * 2;
+        while (da < -Math.PI) da += Math.PI * 2;
+        curr.angle += da * lerpFactor;
+        
+        drawCarAt(curr.x, curr.y, curr.angle, curr.color);
+      }
+      
+      // Dibujar mi propio auto
+      drawCarAt(car.x, car.y, car.angle, myColor);
+
+      drawLapFlash();
+      updateHUD();
+      requestAnimationFrame(loop);
+    }
+
+    resetGame();
+    
+    if (isHost) {
+      document.getElementById("overlay-text").textContent = "Sala Lista";
+      document.getElementById("btn-start").style.display = "block";
+    } else {
+      document.getElementById("overlay-text").textContent = "Esperando que el Host inicie...";
+    }
+
+    lastTime = performance.now();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>

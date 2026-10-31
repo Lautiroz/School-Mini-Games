@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Adivina el Número (P2P)</title>
+  <style>
+    body { background:#1e1e2f; color:#f0f0f0; font-family: system-ui; display:flex; flex-direction:column; align-items:center; padding:2rem; }
+    h1 { margin-bottom:1rem; }
+    input, button { padding:.7rem 1rem; border-radius:10px; border:none; font-size:1rem; margin:.3rem; }
+    input { background:#2e2e4a; color:#fff; }
+    button { background:#6c6cff; color:#fff; cursor:pointer; }
+    #log { margin-top:1.5rem; max-width:400px; width:100%; background:#2e2e4a; padding:1rem; border-radius:12px; height:200px; overflow-y:auto; font-size:.9rem; }
+    a.volver { margin-top:1.5rem; color:#9c9cff; text-decoration:none; }
+    .fila { display:flex; gap:.5rem; }
+  </style>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+<body>
+  <h1>🌐 Adivina el Número (P2P)</h1>
+  <p>El Host crea la sala; los demás se unen con el código</p>
+
+  <div class="fila">
+    <input id="codigo" placeholder="Código de sala" />
+    <button onclick="crear()">Crear Sala (Host)</button>
+    <button onclick="unirse()">Unirse</button>
+  </div>
+
+  <div class="fila" id="juego" style="display:none">
+    <input id="numero" type="number" placeholder="1 al 100" />
+    <button onclick="intentar()">Probar</button>
+  </div>
+
+  <div id="log"></div>
+  <a class="volver" href="../index.html">← Volver al hub</a>
+
+  <script>
+    const logEl = document.getElementById("log");
+    const juegoEl = document.getElementById("juego");
+    let peer = null;
+    let conn = null;
+    let esHost = false;
+    let numeroSecreto = null;
+
+    function log(msg) {
+      const p = document.createElement("p");
+      p.textContent = msg;
+      logEl.appendChild(p);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    // ---------- LÓGICA DEL HOST ----------
+    function crear() {
+      const codigo = document.getElementById("codigo").value.trim();
+      if (!codigo) return alert("Escribe un código para tu sala");
+
+      peer = new Peer(codigo);
+      esHost = true;
+      numeroSecreto = Math.floor(Math.random() * 100) + 1;
+
+      peer.on("open", (id) => {
+        log("✅ Sala creada como Host. Código: " + id);
+        log("Comparte este código con tus amigos.");
+      });
+
+      peer.on("connection", (c) => {
+        conn = c;
+        log("👤 Un jugador se ha conectado.");
+        conn.on("data", (data) => manejarDatosHost(data));
+        conn.on("open", () => {
+          juegoEl.style.display = "flex";
+        });
+      });
+
+      peer.on("error", (err) => log("❌ Error: " + err));
+    }
+
+    function manejarDatosHost(data) {
+      if (data.tipo === "intento") {
+        const n = parseInt(data.numero);
+        let pista;
+        if (n === numeroSecreto) pista = "¡ACERTASTE!";
+        else if (n < numeroSecreto) pista = "Muy bajo";
+        else pista = "Muy alto";
+        
+        log(`➡️ Invitado probó ${n}: ${pista}`);
+        if (conn) conn.send({ tipo: "resultado", numero: n, pista });
+      }
+    }
+
+    // ---------- LÓGICA DEL INVITADO ----------
+    function unirse() {
+      const codigo = document.getElementById("codigo").value.trim();
+      if (!codigo) return alert("Escribe el código de la sala a la que quieres unirte");
+
+      peer = new Peer();
+
+      peer.on("open", () => {
+        log("🔗 Conectando a la sala " + codigo + "...");
+        conn = peer.connect(codigo);
+        
+        conn.on("open", () => {
+          log("✅ ¡Conectado al Host! Ya puedes jugar.");
+          juegoEl.style.display = "flex";
+        });
+
+        conn.on("data", (data) => {
+          if (data.tipo === "resultado") {
+            log(`⬅️ El Host dice sobre ${data.numero}: ${data.pista}`);
+          }
+        });
+      });
+
+      peer.on("error", (err) => log("❌ Error al conectar: " + err));
+    }
+
+    // ---------- ACCIÓN DE JUGAR ----------
+    function intentar() {
+      const n = document.getElementById("numero").value;
+      if (!n) return;
+
+      if (esHost) {
+        manejarDatosHost({ tipo: "intento", numero: n });
+      } else {
+        if (conn && conn.open) {
+          conn.send({ tipo: "intento", numero: n });
+          log(`📤 Enviaste el número ${n} al Host...`);
+        } else {
+          log("❌ No estás conectado a ninguna sala.");
+        }
+      }
+    }
+  </script>
+</body>
+</html>
