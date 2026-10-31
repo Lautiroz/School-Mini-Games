@@ -1,11 +1,34 @@
 // ==========================================
 // ESTADO GLOBAL
 // ==========================================
-// ... (tus variables existentes) ...
-let cars = {}; 
+let myName = "";
+let myPeer = null;
+let myId = "";
+let roomCode = "";
+let isHost = false;
+let connections = [];
+let players = [];
+let hostConn = null;
+let currentGame = null;
+let adivina = { secreto: null, activo: false, ganador: null };
+let raceResults = [];
+let cars = {}; // Para guardar la posición de todos los autos en la carrera
 
 // Paleta de colores para los autos
 const COLORS = ["#e63946", "#4cc9f0", "#3ecf8e", "#f9c74f", "#9d4edd", "#f9844a"];
+
+// ✅ FIX: Configuración de servidores STUN para conectar entre diferentes redes
+const peerConfig = {
+  config: {
+    'iceServers': [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' }
+    ]
+  }
+};
 
 // ==========================================
 // SISTEMA DE MÚSICA
@@ -15,7 +38,7 @@ let musicStarted = false;
 let isMuted = true; // Empieza muteado hasta que toquen "Continuar"
 
 function playRandomSong() {
-  if (!playlist || playlist.length === 0) return;
+  if (typeof playlist === 'undefined' || !playlist || playlist.length === 0) return;
   
   const randomIndex = Math.floor(Math.random() * playlist.length);
   bgMusic.src = playlist[randomIndex];
@@ -74,7 +97,7 @@ function entrarLobby() {
   showScreen("lobby");
   document.getElementById("join-code").focus();
   
-  iniciarMusica(); // ✅ Acá arranca la música porque el usuario ya hizo clic
+  iniciarMusica(); // ✅ Arranca la música porque el usuario ya hizo clic
 }
 
 document.getElementById("nickname-input").addEventListener("keypress", e => {
@@ -105,7 +128,8 @@ function crearSala() {
   connections = [];
   cars = {};
 
-  myPeer = new Peer(roomCode);
+  // ✅ FIX: Se pasa la configuración STUN
+  myPeer = new Peer(roomCode, peerConfig);
 
   myPeer.on("open", id => {
     myId = id;
@@ -126,7 +150,7 @@ function crearSala() {
       connections = connections.filter(c => c !== conn);
       updatePlayersUI();
       broadcastPlayers();
-      broadcastCars(); // ✅ FIX: avisar a los demás para que borren el auto fantasma
+      broadcastCars(); // Avisar a los demás para que borren el auto fantasma
     });
   });
 
@@ -149,7 +173,9 @@ function unirseSala() {
   document.getElementById("lobby-info").textContent = "Conectando...";
   document.getElementById("lobby-error").textContent = "";
   roomCode = code; isHost = false;
-  myPeer = new Peer();
+  
+  // ✅ FIX: Se pasa la configuración STUN
+  myPeer = new Peer(peerConfig);
 
   myPeer.on("open", id => {
     myId = id;
@@ -164,7 +190,7 @@ function unirseSala() {
   });
 
   myPeer.on("error", err => {
-    document.getElementById("lobby-error").textContent = "No se pudo conectar";
+    document.getElementById("lobby-error").textContent = "No se pudo conectar. Verifica el código o intenta de nuevo.";
     document.getElementById("lobby-info").textContent = "";
     if (myPeer) myPeer.destroy();
     myPeer = null;
@@ -377,7 +403,7 @@ function registrarTiempoCarrera(nombre, tiempo) {
 }
 
 // ==========================================
-// ADIVINA EL NÚMERO (Igual que antes)
+// ADIVINA EL NÚMERO
 // ==========================================
 function abrirAdivina() {
   document.getElementById("game-title").textContent = "🌐 Adivina el Número";
@@ -525,7 +551,7 @@ window.addEventListener("message", (event) => {
     });
   } 
   else if (event.data.type === "car-update") {
-    // ✅ FIX: el host guarda y reenvía; el invitado manda al host
+    // El host guarda y reenvía; el invitado manda al host
     if (isHost) {
       cars[myId] = event.data.state;
       broadcastCars();
