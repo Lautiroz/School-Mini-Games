@@ -174,26 +174,51 @@ function unirseSala() {
   document.getElementById("lobby-error").textContent = "";
   roomCode = code; isHost = false;
   
-  // ✅ FIX: Se pasa la configuración STUN
   myPeer = new Peer(peerConfig);
+
+  // Timeout de 15 segundos por si la red bloquea la conexión
+  let timeoutId = setTimeout(() => {
+    if (!hostConn || !hostConn.open) {
+      document.getElementById("lobby-error").textContent = "Tiempo de espera agotado. Revisá el código o que el Host esté en línea.";
+      document.getElementById("lobby-info").textContent = "";
+      if (myPeer) { myPeer.destroy(); myPeer = null; }
+    }
+  }, 15000);
 
   myPeer.on("open", id => {
     myId = id;
     hostConn = myPeer.connect(code);
+    
     hostConn.on("open", () => {
+      clearTimeout(timeoutId);
       hostConn.send({ type: "name", name: myName });
       document.getElementById("lobby-info").textContent = "";
       entrarSala();
     });
+    
     hostConn.on("data", data => handleDataAsGuest(data));
-    hostConn.on("close", () => { alert("El host cerró la sala"); salirSala(); });
+    
+    hostConn.on("close", () => { 
+      clearTimeout(timeoutId);
+      alert("El host cerró la sala o se perdió la conexión"); 
+      salirSala(); 
+    });
+
+    hostConn.on("error", (err) => {
+      clearTimeout(timeoutId);
+      console.error("Error en hostConn:", err);
+      document.getElementById("lobby-error").textContent = "Error al conectar con el Host.";
+      document.getElementById("lobby-info").textContent = "";
+      if (myPeer) { myPeer.destroy(); myPeer = null; }
+    });
   });
 
   myPeer.on("error", err => {
-    document.getElementById("lobby-error").textContent = "No se pudo conectar. Verifica el código o intenta de nuevo.";
+    clearTimeout(timeoutId);
+    console.error("Error en myPeer:", err);
+    document.getElementById("lobby-error").textContent = "Error de red: " + err.type;
     document.getElementById("lobby-info").textContent = "";
-    if (myPeer) myPeer.destroy();
-    myPeer = null;
+    if (myPeer) { myPeer.destroy(); myPeer = null; }
   });
 }
 
