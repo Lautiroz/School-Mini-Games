@@ -17,15 +17,27 @@ let cars = {}; // Para guardar la posición de todos los autos en la carrera
 // Paleta de colores para los autos
 const COLORS = ["#e63946", "#4cc9f0", "#3ecf8e", "#f9c74f", "#9d4edd", "#f9844a"];
 
-// ✅ FIX: Configuración de servidores STUN para conectar entre diferentes redes
+// ✅ CONFIGURACIÓN STUN + TURN (Metered OpenRelay)
 const peerConfig = {
   config: {
     'iceServers': [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' }
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
     ]
   }
 };
@@ -35,18 +47,16 @@ const peerConfig = {
 // ==========================================
 let bgMusic = new Audio();
 let musicStarted = false;
-let isMuted = true; // Empieza muteado hasta que toquen "Continuar"
+let isMuted = true;
 
 function playRandomSong() {
   if (typeof playlist === 'undefined' || !playlist || playlist.length === 0) return;
-  
   const randomIndex = Math.floor(Math.random() * playlist.length);
   bgMusic.src = playlist[randomIndex];
   bgMusic.volume = 0.5;
   bgMusic.play().catch(e => console.log("Esperando interacción para reproducir audio..."));
 }
 
-// Cuando la canción termina, pasa a otra aleatoria
 bgMusic.addEventListener('ended', playRandomSong);
 
 function iniciarMusica() {
@@ -96,8 +106,7 @@ function entrarLobby() {
   document.getElementById("lobby-nickname").textContent = name;
   showScreen("lobby");
   document.getElementById("join-code").focus();
-  
-  iniciarMusica(); // ✅ Arranca la música porque el usuario ya hizo clic
+  iniciarMusica();
 }
 
 document.getElementById("nickname-input").addEventListener("keypress", e => {
@@ -128,13 +137,11 @@ function crearSala() {
   connections = [];
   cars = {};
 
-  // ✅ FIX: Se pasa la configuración STUN
   myPeer = new Peer(roomCode, peerConfig);
 
   myPeer.on("open", id => {
     myId = id;
     roomCode = id;
-    // El host siempre es el color 0 (Rojo)
     players = [{ peerId: id, name: myName, color: COLORS[0] }];
     document.getElementById("btn-crear").disabled = false;
     document.getElementById("lobby-info").textContent = "";
@@ -150,7 +157,7 @@ function crearSala() {
       connections = connections.filter(c => c !== conn);
       updatePlayersUI();
       broadcastPlayers();
-      broadcastCars(); // Avisar a los demás para que borren el auto fantasma
+      broadcastCars();
     });
   });
 
@@ -170,27 +177,29 @@ function unirseSala() {
     document.getElementById("lobby-error").textContent = "El código debe tener 6 caracteres";
     return;
   }
+  
   document.getElementById("lobby-info").textContent = "Conectando...";
-  document.getElementById("lobby-error").textContent = "";
-  roomCode = code; isHost = false;
+  document.getElementById("lobby-error").textContent = ""; // Limpia errores anteriores
+  roomCode = code; 
+  isHost = false;
   
   myPeer = new Peer(peerConfig);
 
-  // Timeout de 15 segundos por si la red bloquea la conexión
+  // Si tarda más de 10 segundos, avisa que la red bloqueó la conexión
   let timeoutId = setTimeout(() => {
     if (!hostConn || !hostConn.open) {
-      document.getElementById("lobby-error").textContent = "Tiempo de espera agotado. Revisá el código o que el Host esté en línea.";
+      document.getElementById("lobby-error").textContent = "Tiempo agotado: Red bloqueada o el Host está inactivo.";
       document.getElementById("lobby-info").textContent = "";
       if (myPeer) { myPeer.destroy(); myPeer = null; }
     }
-  }, 15000);
+  }, 10000); // 10 segundos
 
   myPeer.on("open", id => {
     myId = id;
     hostConn = myPeer.connect(code);
     
     hostConn.on("open", () => {
-      clearTimeout(timeoutId);
+      clearTimeout(timeoutId); // Cancela el error de tiempo agotado
       hostConn.send({ type: "name", name: myName });
       document.getElementById("lobby-info").textContent = "";
       entrarSala();
@@ -203,21 +212,25 @@ function unirseSala() {
       alert("El host cerró la sala o se perdió la conexión"); 
       salirSala(); 
     });
-
-    hostConn.on("error", (err) => {
-      clearTimeout(timeoutId);
-      console.error("Error en hostConn:", err);
-      document.getElementById("lobby-error").textContent = "Error al conectar con el Host.";
-      document.getElementById("lobby-info").textContent = "";
-      if (myPeer) { myPeer.destroy(); myPeer = null; }
-    });
   });
 
   myPeer.on("error", err => {
     clearTimeout(timeoutId);
-    console.error("Error en myPeer:", err);
-    document.getElementById("lobby-error").textContent = "Error de red: " + err.type;
+    console.error("Error PeerJS:", err);
+    
+    // Mensajes de error específicos
+    let msg = "Error al conectar.";
+    if (err.type === "peer-unavailable") {
+      msg = "La sala no existe. Verificá el código.";
+    } else if (err.type === "network") {
+      msg = "Sin conexión a internet o el servidor está caído.";
+    } else {
+      msg = "Error de red: " + err.type;
+    }
+    
+    document.getElementById("lobby-error").textContent = msg;
     document.getElementById("lobby-info").textContent = "";
+    
     if (myPeer) { myPeer.destroy(); myPeer = null; }
   });
 }
@@ -228,7 +241,6 @@ function unirseSala() {
 function handleDataAsHost(data, conn) {
   switch (data.type) {
     case "name":
-      // Asignar un color basado en cuántos jugadores hay
       const color = COLORS[players.length % COLORS.length];
       players.push({ peerId: conn.peer, name: data.name, color: color });
       updatePlayersUI();
@@ -244,7 +256,6 @@ function handleDataAsHost(data, conn) {
       registrarTiempoCarrera(data.name, data.time);
       break;
     case "car-update":
-      // El host recibe la posición del invitado y la guarda
       cars[conn.peer] = data.state;
       broadcastCars();
       break;
@@ -263,7 +274,6 @@ function handleDataAsGuest(data) {
     case "start-race":
       const iframe = document.querySelector("iframe");
       if (iframe) {
-        // Pasamos mi ID, mi color y mi índice (para arrancar escalonados)
         iframe.contentWindow.postMessage({ 
           type: 'start-race', 
           myId: myId,
@@ -351,7 +361,6 @@ function updatePlayersUI() {
     if (i === 0) cls += " host";
     if (p.peerId === myId) cls += " me";
     chip.className = cls;
-    // Pintamos un puntito con el color del auto del jugador
     chip.innerHTML = `<span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${p.color}; margin-right:8px; border:1px solid #fff;"></span>` + escapeHtml(p.name) + (i === 0 ? '<span class="host-tag">👑</span>' : "");
     list.appendChild(chip);
   });
@@ -549,10 +558,9 @@ function agregarLog(msg, clase) {
 // ==========================================
 window.addEventListener("message", (event) => {
   if (event.data.type === "host-start-race") {
-    cars = {}; // Limpiamos posiciones anteriores
+    cars = {}; 
     const iframe = document.querySelector("iframe");
 
-    // Arrancar el iframe del Host
     if (iframe) {
       iframe.contentWindow.postMessage({ 
         type: 'start-race', 
@@ -562,7 +570,6 @@ window.addEventListener("message", (event) => {
       }, '*');
     }
 
-    // Arrancar los iframes de los invitados
     connections.forEach((c, i) => { 
       if (c.open) {
         const p = players.find(p => p.peerId === c.peer);
@@ -576,7 +583,6 @@ window.addEventListener("message", (event) => {
     });
   } 
   else if (event.data.type === "car-update") {
-    // El host guarda y reenvía; el invitado manda al host
     if (isHost) {
       cars[myId] = event.data.state;
       broadcastCars();
