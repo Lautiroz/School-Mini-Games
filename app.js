@@ -48,15 +48,29 @@ const peerConfig = {
 let bgMusic = new Audio();
 let musicStarted = false;
 let isMuted = true;
+let currentSongIndex = -1; // Para no repetir la misma canción
 
 function playRandomSong() {
   if (typeof playlist === 'undefined' || !playlist || playlist.length === 0) return;
-  const randomIndex = Math.floor(Math.random() * playlist.length);
+  
+  let randomIndex;
+  
+  // Si hay más de una canción, elegimos una distinta a la actual
+  if (playlist.length > 1) {
+    do {
+      randomIndex = Math.floor(Math.random() * playlist.length);
+    } while (randomIndex === currentSongIndex);
+  } else {
+    randomIndex = 0;
+  }
+  
+  currentSongIndex = randomIndex;
   bgMusic.src = playlist[randomIndex];
   bgMusic.volume = 0.5;
   bgMusic.play().catch(e => console.log("Esperando interacción para reproducir audio..."));
 }
 
+// Cuando la canción termina, pasa a otra aleatoria
 bgMusic.addEventListener('ended', playRandomSong);
 
 function iniciarMusica() {
@@ -81,6 +95,20 @@ function toggleMusic() {
     isMuted = true;
     btn.textContent = "🔇";
     bgMusic.pause();
+  }
+}
+
+// ✅ NUEVO: Función para saltear la canción
+function nextSong() {
+  if (!musicStarted) {
+    iniciarMusica(); // Si nunca arrancó, la iniciamos
+  } else {
+    playRandomSong(); // Si ya estaba sonando, pasamos a la siguiente
+    if (isMuted) {
+      // Si estaba muteado, lo desmuteamos para que escuche la nueva
+      isMuted = false;
+      document.getElementById("btn-music").textContent = "🔊";
+    }
   }
 }
 

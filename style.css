@@ -256,12 +256,17 @@ h1 { font-size: 2rem; margin-bottom: 0.5rem; text-align: center; }
   filter: grayscale(100%);
 }
 
-/* Botón flotante de música */
-.music-btn {
+/* Controles flotantes de música */
+.music-controls {
   position: fixed;
   top: 15px;
   right: 15px;
   z-index: 1000;
+  display: flex;
+  gap: 10px;
+}
+
+.music-btn {
   background: rgba(46, 46, 74, 0.8);
   color: #fff;
   border: 1px solid #6c6cff;
@@ -276,6 +281,7 @@ h1 { font-size: 2rem; margin-bottom: 0.5rem; text-align: center; }
   align-items: center;
   justify-content: center;
 }
+
 .music-btn:hover {
   background: #6c6cff;
   transform: scale(1.1);
